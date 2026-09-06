@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Log in — CivicFix</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Newsreader:wght@600;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<header class="masthead">
+  <div class="masthead-top">
+    <a href="index.html" class="wordmark">Civic<span>Fix</span></a>
+  </div>
+  <nav class="tabs">
+    <a href="index.html" class="active-tab">Login</a>
+  </nav>
+</header>
+
+<main>
+  <div class="login-layout">
+    <div>
+      <h1>Welcome back</h1>
+      <p>Log in to file a complaint, track one, or manage the queue if you're with an authority.</p>
+
+      <div class="form-toggle">
+        <button type="button" id="tabCitizen" class="active">Citizen</button>
+        <button type="button" id="tabAuthority">Authority</button>
+      </div>
+
+      <div class="form-card">
+        <form id="loginForm">
+          <label for="email">Email</label>
+          <input type="email" id="email" required>
+
+          <label for="password">Password</label>
+          <div class="password-field">
+            <input type="password" id="password" required>
+            <button type="button" id="togglePassword">👁</button>
+          </div>
+
+
+          <button type="submit" class="primary-btn">Log in</button>
+          <p class="msg" id="msg"></p>
+        </form>
+      </div>
+    </div>
+
+    <div id="signupPanel" class="signup-panel">
+      <h2>New citizen?</h2>
+      <p>Create a free account to raise complaints and track them.</p>
+      <a href="signup.html" class="btn">Create new account</a>
+      <p class="fine-print">Authority accounts are set up by the CivicFix team and can't be self-registered.</p>
+    </div>
+  </div>
+</main>
+
+<footer>CivicFix — Smart India Hackathon 2026</footer>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<script src="js/config.js"></script>
+<script src="js/supabaseClient.js"></script>
+<script>
+  let selectedRole = "citizen";
+  const tabCitizen = document.getElementById("tabCitizen");
+  const tabAuthority = document.getElementById("tabAuthority");
+  const signupPanel = document.getElementById("signupPanel");
+
+  tabCitizen.addEventListener("click", () => {
+    selectedRole = "citizen";
+    tabCitizen.classList.add("active");
+    tabAuthority.classList.remove("active");
+    signupPanel.style.display = "";
+  });
+
+  tabAuthority.addEventListener("click", () => {
+    selectedRole = "authority";
+    tabAuthority.classList.add("active");
+    tabCitizen.classList.remove("active");
+    signupPanel.style.display = "none";
+  });
+
+  document.getElementById("loginForm").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const msg = document.getElementById("msg");
+    msg.textContent = "";
+    msg.className = "msg";
+
+    const email = document.getElementById("email").value.trim();
+    const password = document.getElementById("password").value;
+
+    const { data, error } = await sb.auth.signInWithPassword({ email, password });
+    if (error) {
+      msg.textContent = error.message;
+      msg.className = "msg error";
+      return;
+    }
+
+    const { data: profile, error: profErr } = await sb
+      .from("profiles")
+      .select("role")
+      .eq("id", data.user.id)
+      .single();
+
+    if (profErr || !profile) {
+      console.error("PROFILE ERROR:", profErr);
+      console.log("USER ID:", data.user.id);
+      console.log("PROFILE:", profile);
+
+      msg.textContent = profErr
+        ? profErr.message
+        : "Profile not found.";
+
+      msg.className = "msg error";
+      await sb.auth.signOut();
+      return;
+    }
+
+
+    if (profile.role !== selectedRole) {
+      msg.textContent = `This account is registered as ${profile.role}, not ${selectedRole}. Switch tabs above.`;
+      msg.className = "msg error";
+      await sb.auth.signOut();
+      return;
+    }
+
+    window.location.href = profile.role === "authority" ? "complaints.html" : "home.html";
+  });
+
+  // Already logged in? Skip straight past the login screen.
+  (async () => {
+    const { data: { session } } = await sb.auth.getSession();
+    if (!session) return;
+    const { data: profile } = await sb.from("profiles").select("role").eq("id", session.user.id).single();
+    if (profile) window.location.href = profile.role === "authority" ? "complaints.html" : "home.html";
+  })();
+  document.getElementById("togglePassword").addEventListener("click", () => {
+  const password = document.getElementById("password");
+
+  if (password.type === "password") {
+      password.type = "text";
+    } else {
+      password.type = "password";
+    }
+  });
+
+</script>
+</body>
+</html>

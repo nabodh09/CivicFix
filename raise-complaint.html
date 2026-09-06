@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Raise a Complaint — CivicFix</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Newsreader:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<header class="masthead">
+  <div class="masthead-top">
+    <a href="home.html" class="wordmark">Civic<span>Fix</span></a>
+    <div class="user-slot" data-nav="any">Signed in as <span data-user-name></span> · <a href="#" id="logoutBtn">Log out</a></div>
+  </div>
+  <nav class="tabs">
+    <a href="home.html" data-nav="any">Home</a>
+    <a href="raise-complaint.html" class="active-tab" data-nav="citizen">Raise a Complaint</a>
+    <a href="track-complaint.html" data-nav="citizen">Track a Complaint</a>
+  </nav>
+</header>
+
+<main>
+  <div id="confirmationArea" class="hidden">
+    <h1>Complaint filed</h1>
+    <div class="confirmation-card">
+      <div class="confirmation-id" id="confirmId">#—</div>
+      <p>Your complaint has been submitted. Keep this number to track it under <a href="track-complaint.html">Track a Complaint</a>.</p>
+      <button type="button" class="secondary" id="fileAnotherBtn">File another complaint</button>
+    </div>
+  </div>
+
+  <div id="formArea" class="hidden">
+    <h1>Raise a complaint</h1>
+    <p>Attach a clear photo of the issue — it's what authorities and other citizens will see.</p>
+
+    <div class="form-card wide">
+      <form id="complaintForm">
+        <label for="title">Title</label>
+        <input type="text" id="title" placeholder="e.g. Overflowing garbage bin on 4th Cross Street" required>
+
+        <label for="description">Description</label>
+        <textarea id="description" placeholder="What's the problem, and how long has it been there?" required></textarea>
+        <div id="suggestChipHolder"></div>
+
+        <label for="category">Category</label>
+        <select id="category" required>
+          <option value="">Select a category</option>
+        </select>
+
+        <label for="location">Location</label>
+        <input type="text" id="location" placeholder="Landmark, street, ward" required>
+        <button type="button" class="secondary" id="useLocationBtn" style="margin-top: 8px;">📍 Use my current location</button>
+        <div class="msg" id="locationMsg"></div>
+
+        <label for="photo">Photo of the issue</label>
+        <input type="file" id="photo" accept="image/*" required>
+
+        <button type="submit">Submit complaint</button>
+        <p class="msg" id="msg"></p>
+      </form>
+    </div>
+  </div>
+</main>
+
+<footer>CivicFix — Smart India Hackathon 2026</footer>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<script src="js/config.js"></script>
+<script src="js/supabaseClient.js"></script>
+<script src="js/nav.js"></script>
+<script src="js/categories.js"></script>
+<script>
+  let currentUser = null;
+  let capturedLat = null;
+  let capturedLng = null;
+
+  const categorySelect = document.getElementById("category");
+  CATEGORIES.forEach((cat) => {
+    const opt = document.createElement("option");
+    opt.value = cat;
+    opt.textContent = `${categoryIcon(cat)} ${cat}`;
+    categorySelect.appendChild(opt);
+  });
+
+  (async () => {
+    currentUser = await initNav();
+    if (!currentUser || currentUser.role !== "citizen") {
+      window.location.href = "index.html";
+      return;
+    }
+    document.getElementById("formArea").classList.remove("hidden");
+  })();
+
+  // Lightweight "AI" category suggestion based on title + description text.
+  function checkSuggestion() {
+    const text = document.getElementById("title").value + " " + document.getElementById("description").value;
+    const holder = document.getElementById("suggestChipHolder");
+    const suggestion = suggestCategory(text);
+    if (!suggestion || categorySelect.value === suggestion) {
+      holder.innerHTML = "";
+      return;
+    }
+    holder.innerHTML = `<span class="suggest-chip" id="applySuggestion">✨ Looks like "${suggestion}" — tap to apply</span>`;
+    document.getElementById("applySuggestion").addEventListener("click", () => {
+      categorySelect.value = suggestion;
+      holder.innerHTML = "";
+    });
+  }
+  document.getElementById("title").addEventListener("input", checkSuggestion);
+  document.getElementById("description").addEventListener("input", checkSuggestion);
+
+  document.getElementById("useLocationBtn").addEventListener("click", () => {
+    const locationMsg = document.getElementById("locationMsg");
+    if (!navigator.geolocation) {
+      locationMsg.textContent = "Location isn't available in this browser.";
+      locationMsg.className = "msg error";
+      return;
+    }
+    locationMsg.textContent = "Getting your location...";
+    locationMsg.className = "msg";
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        capturedLat = pos.coords.latitude;
+        capturedLng = pos.coords.longitude;
+        locationMsg.textContent = `Location captured (${capturedLat.toFixed(4)}, ${capturedLng.toFixed(4)}) — helps verify this isn't a duplicate or fake report.`;
+        locationMsg.className = "msg ok";
+      },
+      () => {
+        locationMsg.textContent = "Couldn't get your location. You can still type it in above.";
+        locationMsg.className = "msg error";
+      }
+    );
+  });
+
+  document.getElementById("fileAnotherBtn").addEventListener("click", () => {
+    document.getElementById("confirmationArea").classList.add("hidden");
+    document.getElementById("formArea").classList.remove("hidden");
+  });
+
+  document.getElementById("complaintForm").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const msg = document.getElementById("msg");
+    msg.textContent = "Uploading photo...";
+    msg.className = "msg";
+
+    const title = document.getElementById("title").value.trim();
+    const category = document.getElementById("category").value;
+    const location_text = document.getElementById("location").value.trim();
+    const description = document.getElementById("description").value.trim();
+    const file = document.getElementById("photo").files[0];
+
+    const filePath = `${currentUser.id}/${Date.now()}-${file.name}`;
+    const { error: uploadErr } = await sb.storage.from("complaint-photos").upload(filePath, file);
+
+    if (uploadErr) {
+      msg.textContent = uploadErr.message;
+      msg.className = "msg error";
+      return;
+    }
+
+    const { data: urlData } = sb.storage.from("complaint-photos").getPublicUrl(filePath);
+
+    const { data: inserted, error: insertErr } = await sb.from("complaints").insert({
+      citizen_id: currentUser.id,
+      title,
+      category,
+      location_text,
+      description,
+      photo_url: urlData.publicUrl,
+      status: "open",
+      priority: priorityForCategory(category),
+      latitude: capturedLat,
+      longitude: capturedLng,
+    }).select("id").single();
+
+    if (insertErr) {
+      msg.textContent = insertErr.message;
+      msg.className = "msg error";
+      return;
+    }
+
+    document.getElementById("formArea").classList.add("hidden");
+    document.getElementById("confirmationArea").classList.remove("hidden");
+    document.getElementById("confirmId").textContent = `#${inserted.id}`;
+    document.getElementById("complaintForm").reset();
+    document.getElementById("suggestChipHolder").innerHTML = "";
+    document.getElementById("locationMsg").textContent = "";
+    capturedLat = null;
+    capturedLng = null;
+  });
+</script>
+</body>
+</html>

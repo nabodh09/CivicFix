@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CivicFix — Grievance Reporting & Resolution</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Newsreader:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<header class="masthead">
+  <div class="masthead-top">
+    <div>
+      <a href="home.html" class="wordmark">Civic<span>Fix</span></a>
+    </div>
+    <div class="user-slot" data-nav="any">Signed in as <span data-user-name></span> · <a href="#" id="logoutBtn">Log out</a></div>
+  </div>
+  <nav class="tabs">
+    <a href="home.html" class="active-tab" data-nav="any">Home</a>
+    <a href="raise-complaint.html" data-nav="citizen">Raise a Complaint</a>
+    <a href="track-complaint.html" data-nav="citizen">Track a Complaint</a>
+    <a href="track-complaint.html" data-nav="authority">Track a Complaint</a>
+    <a href="complaints.html" data-nav="authority">Complaints Queue</a>
+    <a href="close-complaint.html" data-nav="authority">Close a Complaint</a>
+  </nav>
+</header>
+
+<main>
+  <div class="hero">
+    <h1>Snap it. Report it. Watch it get fixed.</h1>
+    <p>Every issue below was reported by a citizen and closed out by an authority with a photo as proof — no complaint gets marked resolved without evidence.</p>
+  </div>
+
+  <div class="stats-strip" id="statsStrip">
+    <div class="stat-card"><div class="stat-number">—</div><div class="stat-label">Total filed</div></div>
+    <div class="stat-card open"><div class="stat-number">—</div><div class="stat-label">Open</div></div>
+    <div class="stat-card progress"><div class="stat-number">—</div><div class="stat-label">In progress</div></div>
+    <div class="stat-card closed"><div class="stat-number">—</div><div class="stat-label">Closed</div></div>
+  </div>
+
+  <div class="section-heading">
+    <h2>Closed complaints</h2>
+    <span class="count-pill" id="countPill"></span>
+  </div>
+
+  <div class="filter-bar">
+    <select id="categoryFilter"><option value="">All categories</option></select>
+    <select id="sortOrder">
+      <option value="newest">Newest first</option>
+      <option value="oldest">Oldest first</option>
+    </select>
+  </div>
+
+  <div class="bulletin" id="bulletin">
+    <div class="empty-state">Loading...</div>
+  </div>
+</main>
+
+<footer>CivicFix — Smart India Hackathon 2026</footer>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<script src="js/config.js"></script>
+<script src="js/supabaseClient.js"></script>
+<script src="js/nav.js"></script>
+<script src="js/categories.js"></script>
+<script>
+  let allClosed = [];
+
+  function populateCategoryFilter() {
+    const select = document.getElementById("categoryFilter");
+    CATEGORIES.forEach((cat) => {
+      const opt = document.createElement("option");
+      opt.value = cat;
+      opt.textContent = `${categoryIcon(cat)} ${cat}`;
+      select.appendChild(opt);
+    });
+  }
+
+  async function loadStats() {
+    const strip = document.getElementById("statsStrip");
+    const [{ count: total }, { count: open }, { count: inProgress }, { count: closed }] = await Promise.all([
+      sb.from("complaints").select("id", { count: "exact", head: true }),
+      sb.from("complaints").select("id", { count: "exact", head: true }).eq("status", "open"),
+      sb.from("complaints").select("id", { count: "exact", head: true }).eq("status", "in_progress"),
+      sb.from("complaints").select("id", { count: "exact", head: true }).eq("status", "closed"),
+    ]);
+    strip.innerHTML = `
+      <div class="stat-card"><div class="stat-number">${total ?? 0}</div><div class="stat-label">Total filed</div></div>
+      <div class="stat-card open"><div class="stat-number">${open ?? 0}</div><div class="stat-label">Open</div></div>
+      <div class="stat-card progress"><div class="stat-number">${inProgress ?? 0}</div><div class="stat-label">In progress</div></div>
+      <div class="stat-card closed"><div class="stat-number">${closed ?? 0}</div><div class="stat-label">Closed</div></div>
+    `;
+  }
+
+  function renderBulletin() {
+    const bulletin = document.getElementById("bulletin");
+    const countPill = document.getElementById("countPill");
+    const category = document.getElementById("categoryFilter").value;
+    const order = document.getElementById("sortOrder").value;
+
+    let rows = category ? allClosed.filter((c) => c.category === category) : allClosed;
+    rows = [...rows].sort((a, b) =>
+      order === "newest" ? new Date(b.closed_at) - new Date(a.closed_at) : new Date(a.closed_at) - new Date(b.closed_at)
+    );
+
+    countPill.textContent = `${rows.length} shown`;
+
+    if (rows.length === 0) {
+      bulletin.innerHTML = `<div class="empty-state">Nothing matches that filter yet.</div>`;
+      return;
+    }
+
+    bulletin.innerHTML = rows.map((c) => `
+      <div class="bulletin-item">
+        <div class="photo-pair">
+          <figure><img src="${c.photo_url}" alt="Reported issue for complaint #${c.id}"><figcaption>Reported</figcaption></figure>
+          <figure><img src="${c.resolution_photo_url}" alt="Proof of fix for complaint #${c.id}"><figcaption>Fixed</figcaption></figure>
+        </div>
+        <div class="bulletin-id">Complaint #${c.id}</div>
+        <h3><span class="category-icon">${categoryIcon(c.category)}</span>${c.title}</h3>
+        <div class="bulletin-meta">${c.category} · ${c.location_text}</div>
+        <div class="bulletin-meta">Closed ${new Date(c.closed_at).toLocaleDateString()}</div>
+      </div>
+    `).join("");
+  }
+
+  async function loadClosedComplaints() {
+    const bulletin = document.getElementById("bulletin");
+    const { data, error } = await sb
+      .from("complaints")
+      .select("id, title, category, location_text, photo_url, resolution_photo_url, closed_at")
+      .eq("status", "closed")
+      .order("closed_at", { ascending: false });
+
+    if (error) {
+      bulletin.innerHTML = `<div class="empty-state">Couldn't load complaints right now.</div>`;
+      return;
+    }
+
+    allClosed = data;
+    renderBulletin();
+  }
+
+  populateCategoryFilter();
+  document.getElementById("categoryFilter").addEventListener("change", renderBulletin);
+  document.getElementById("sortOrder").addEventListener("change", renderBulletin);
+
+  (async () => {
+    const user = await initNav();
+    if (!user) {
+      window.location.href = "index.html";
+      return;
+    }
+    loadStats();
+    loadClosedComplaints();
+  })();
+</script>
+</body>
+</html>

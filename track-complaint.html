@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Track a Complaint — CivicFix</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Newsreader:wght@500;600&family=IBM+Plex+Sans:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<header class="masthead">
+  <div class="masthead-top">
+    <a href="home.html" class="wordmark">Civic<span>Fix</span></a>
+    <div class="user-slot" data-nav="any">Signed in as <span data-user-name></span> · <a href="#" id="logoutBtn">Log out</a></div>
+  </div>
+  <nav class="tabs">
+    <a href="home.html" data-nav="any">Home</a>
+    <a href="raise-complaint.html" data-nav="citizen">Raise a Complaint</a>
+    <a href="track-complaint.html">Track a Complaint</a>
+    <a href="complaints.html" data-nav="authority">Complaints Queue</a>
+    <a href="close-complaint.html" data-nav="authority">Close a Complaint</a>
+  </nav>
+</header>
+
+<main>
+  <h1>Track a complaint</h1>
+
+  <!-- Citizen view -->
+  <div id="citizenView" class="hidden">
+    <p>Everything you've reported, and where it stands.</p>
+    <div id="myComplaints"><div class="empty-state">Loading...</div></div>
+  </div>
+
+  <!-- Authority view -->
+  <div id="authorityView" class="hidden">
+    <p>Look up any complaint by its ID to see its full history.</p>
+    <div class="form-card">
+      <label for="searchId">Complaint ID</label>
+      <input type="number" id="searchId" placeholder="e.g. 14">
+      <button type="button" id="searchBtn">Look up</button>
+      <p class="msg" id="searchMsg"></p>
+    </div>
+    <div id="searchResult" style="margin-top: 24px;"></div>
+  </div>
+</main>
+
+<footer>CivicFix — Smart India Hackathon 2026</footer>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<script src="js/config.js"></script>
+<script src="js/supabaseClient.js"></script>
+<script src="js/nav.js"></script>
+<script src="js/categories.js"></script>
+<script>
+  function statusLabel(s) {
+    return { open: "Open", in_progress: "In progress", closed: "Closed" }[s] || s;
+  }
+
+  function renderComplaint(c, showCitizenCol) {
+    return `
+      <div class="complaint-row">
+        <img src="${c.photo_url}" alt="Photo for complaint #${c.id}">
+        <div>
+          <div class="bulletin-id">#${c.id} — ${categoryIcon(c.category)} ${c.category}</div>
+          <h3 style="margin: 2px 0;">${c.title}</h3>
+          <div class="meta">${c.location_text}</div>
+          ${showCitizenCol ? `<div class="meta">Filed by ${c.profiles ? c.profiles.full_name : "citizen"}</div>` : ""}
+          ${c.resolution_note ? `<div class="meta">Resolution note: ${c.resolution_note}</div>` : ""}
+        </div>
+        <div class="actions">
+          <span class="status status-${c.status}">${statusLabel(c.status)}</span>
+          ${c.priority ? `<span class="priority priority-${c.priority}">${c.priority} priority</span>` : ""}
+        </div>
+      </div>
+    `;
+  }
+
+  async function loadCitizenComplaints(user) {
+    const container = document.getElementById("myComplaints");
+    const { data, error } = await sb
+      .from("complaints")
+      .select("*")
+      .eq("citizen_id", user.id)
+      .order("created_at", { ascending: false });
+
+    if (error) {
+      container.innerHTML = `<div class="empty-state">Couldn't load your complaints.</div>`;
+      return;
+    }
+    if (data.length === 0) {
+      container.innerHTML = `<div class="empty-state">You haven't raised a complaint yet. <a href="raise-complaint.html">Raise one</a>.</div>`;
+      return;
+    }
+    container.innerHTML = data.map((c) => renderComplaint(c, false)).join("");
+  }
+
+  document.getElementById("searchBtn").addEventListener("click", async () => {
+    const id = document.getElementById("searchId").value;
+    const msg = document.getElementById("searchMsg");
+    const result = document.getElementById("searchResult");
+    msg.textContent = "";
+    result.innerHTML = "";
+
+    if (!id) {
+      msg.textContent = "Enter a complaint ID.";
+      msg.className = "msg error";
+      return;
+    }
+
+    const { data, error } = await sb
+      .from("complaints")
+      .select("*, profiles!complaints_citizen_id_fkey(full_name)")
+      .eq("id", id)
+      .single();
+
+    if (error) {
+      console.error("TRACK ERROR:", error);
+      msg.textContent = error.message;
+      msg.className = "msg error";
+      return;
+    }
+
+    if (!data) {
+
+      msg.textContent = "No complaint found with that ID.";
+      msg.className = "msg error";
+      return;
+    }
+
+    result.innerHTML = renderComplaint(data, true);
+  });
+
+  (async () => {
+    const user = await initNav();
+    if (!user) {
+      window.location.href = "index.html";
+      return;
+    }
+    if (user.role === "citizen") {
+      document.getElementById("citizenView").classList.remove("hidden");
+      loadCitizenComplaints(user);
+    } else {
+      document.getElementById("authorityView").classList.remove("hidden");
+    }
+  })();
+</script>
+</body>
+</html>

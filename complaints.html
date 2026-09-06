@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Complaints Queue — CivicFix</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Newsreader:wght@500;600&family=IBM+Plex+Sans:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<header class="masthead">
+  <div class="masthead-top">
+    <a href="home.html" class="wordmark">Civic<span>Fix</span></a>
+    <div class="user-slot" data-nav="any">Signed in as <span data-user-name></span> · <a href="#" id="logoutBtn">Log out</a></div>
+  </div>
+  <nav class="tabs">
+    <a href="home.html" data-nav="any">Home</a>
+    <a href="track-complaint.html" data-nav="authority">Track a Complaint</a>
+    <a href="complaints.html" class="active-tab">Complaints Queue</a>
+    <a href="close-complaint.html" data-nav="authority">Close a Complaint</a>
+  </nav>
+</header>
+
+<main>
+  <div class="section-heading">
+    <h1 style="margin: 0;">Complaints queue</h1>
+    <span class="count-pill" id="countPill"></span>
+  </div>
+  <div id="list"><div class="empty-state">Loading...</div></div>
+</main>
+
+<footer>CivicFix — Smart India Hackathon 2026</footer>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<script src="js/config.js"></script>
+<script src="js/supabaseClient.js"></script>
+<script src="js/nav.js"></script>
+<script src="js/categories.js"></script>
+<script src="js/toast.js"></script>
+<script>
+  const OVERDUE_DAYS = 3;
+  const PRIORITY_RANK = { high: 0, medium: 1, low: 2 };
+
+  function statusLabel(s) {
+    return { open: "Open", in_progress: "In progress", closed: "Closed" }[s] || s;
+  }
+
+  function isOverdue(c) {
+    if (c.status === "closed") return false;
+    const ageDays = (Date.now() - new Date(c.created_at)) / (1000 * 60 * 60 * 24);
+    return ageDays > OVERDUE_DAYS;
+  }
+
+  function notifyNewComplaints(user, data) {
+    const key = `civicfix_last_seen_${user.id}`;
+    const lastSeen = localStorage.getItem(key);
+    const lastSeenTime = lastSeen ? new Date(lastSeen) : null;
+
+    if (lastSeenTime) {
+      const newCount = data.filter((c) => new Date(c.created_at) > lastSeenTime).length;
+      if (newCount > 0) {
+        showToast(`${newCount} new complaint${newCount > 1 ? "s" : ""} received since your last visit.`, "info");
+      }
+    }
+    localStorage.setItem(key, new Date().toISOString());
+  }
+
+  async function loadQueue(user) {
+    const list = document.getElementById("list");
+    const countPill = document.getElementById("countPill");
+
+    const { data, error } = await sb
+      .from("complaints")
+      .select("*, profiles!complaints_citizen_id_fkey(full_name)")
+
+
+    if (error) {
+      console.error("QUEUE ERROR:", error);
+      list.innerHTML = `<div class="empty-state">${error.message}</div>`;
+      return; 
+    }
+
+
+    notifyNewComplaints(user, data);
+
+    const openCount = data.filter((c) => c.status !== "closed").length;
+    countPill.textContent = `${openCount} awaiting action`;
+
+    if (data.length === 0) {
+      list.innerHTML = `<div class="empty-state">No complaints filed yet.</div>`;
+      return;
+    }
+
+    const sorted = [...data].sort((a, b) => {
+      if (a.status === "closed" && b.status !== "closed") return 1;
+      if (b.status === "closed" && a.status !== "closed") return -1;
+      const rankDiff = (PRIORITY_RANK[a.priority] ?? 2) - (PRIORITY_RANK[b.priority] ?? 2);
+      if (rankDiff !== 0) return rankDiff;
+      return new Date(a.created_at) - new Date(b.created_at);
+    });
+
+    list.innerHTML = sorted.map((c) => `
+      <div class="complaint-row">
+        <img src="${c.photo_url}" alt="Photo for complaint #${c.id}">
+        <div>
+          <div class="bulletin-id">#${c.id} — ${categoryIcon(c.category)} ${c.category}</div>
+          <h3 style="margin: 2px 0;">${c.title}</h3>
+          <div class="meta">${c.location_text} · Filed by ${c.profiles ? c.profiles.full_name : "citizen"}</div>
+        </div>
+        <div class="actions">
+          <span class="status status-${c.status}">${statusLabel(c.status)}</span>
+          <span class="priority priority-${c.priority || "low"}">${c.priority || "low"} priority</span>
+          ${isOverdue(c) ? `<span class="overdue-flag">Overdue</span>` : ""}
+          ${c.status === "open" ? `<button type="button" class="secondary ack-btn" data-id="${c.id}">Acknowledge</button>` : ""}
+          ${c.status !== "closed" ? `<a class="btn" href="close-complaint.html?id=${c.id}">Close</a>` : ""}
+        </div>
+      </div>
+    `).join("");
+
+    document.querySelectorAll(".ack-btn").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        await sb.from("complaints").update({ status: "in_progress" }).eq("id", btn.dataset.id);
+        loadQueue(user);
+      });
+    });
+  }
+
+  (async () => {
+    const user = await requireRole("authority");
+    if (!user) return;
+    await initNav();
+    loadQueue(user);
+  })();
+</script>
+</body>
+</html>

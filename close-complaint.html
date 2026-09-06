@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Close a Complaint — CivicFix</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Newsreader:wght@500;600&family=IBM+Plex+Sans:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<header class="masthead">
+  <div class="masthead-top">
+    <a href="home.html" class="wordmark">Civic<span>Fix</span></a>
+    <div class="user-slot" data-nav="any">Signed in as <span data-user-name></span> · <a href="#" id="logoutBtn">Log out</a></div>
+  </div>
+  <nav class="tabs">
+    <a href="home.html" data-nav="any">Home</a>
+    <a href="track-complaint.html" data-nav="authority">Track a Complaint</a>
+    <a href="complaints.html" data-nav="authority">Complaints Queue</a>
+    <a href="close-complaint.html">Close a Complaint</a>
+  </nav>
+</header>
+
+<main>
+  <h1>Close a complaint</h1>
+  <p>Upload a photo proving the work is done. This is what citizens will see as evidence.</p>
+
+  <div class="form-card wide">
+    <label for="complaintSelect">Complaint</label>
+    <select id="complaintSelect"></select>
+
+    <div id="preview" style="margin-top: 16px;"></div>
+
+    <form id="closeForm" style="margin-top: 20px;">
+      <label for="note">Resolution note</label>
+      <textarea id="note" placeholder="What was done to fix this?" required></textarea>
+
+      <label for="proofPhoto">Proof photo</label>
+      <input type="file" id="proofPhoto" accept="image/*" required>
+
+      <button type="submit">Mark as closed</button>
+      <p class="msg" id="msg"></p>
+    </form>
+  </div>
+</main>
+
+<footer>CivicFix — Smart India Hackathon 2026</footer>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<script src="js/config.js"></script>
+<script src="js/supabaseClient.js"></script>
+<script src="js/nav.js"></script>
+<script src="js/categories.js"></script>
+<script src="js/toast.js"></script>
+<script>
+  let currentUser = null;
+  let openComplaints = [];
+
+  function renderPreview(c) {
+    const preview = document.getElementById("preview");
+    if (!c) { preview.innerHTML = ""; return; }
+    preview.innerHTML = `
+      <div class="complaint-row" style="border-bottom: none;">
+        <img src="${c.photo_url}" alt="Photo for complaint #${c.id}">
+        <div>
+          <div class="bulletin-id">#${c.id} — ${categoryIcon(c.category)} ${c.category}</div>
+          <h3 style="margin: 2px 0;">${c.title}</h3>
+          <div class="meta">${c.location_text}</div>
+        </div>
+      </div>
+    `;
+  }
+
+  async function loadOpenComplaints() {
+    const select = document.getElementById("complaintSelect");
+    const { data, error } = await sb
+      .from("complaints")
+      .select("*")
+      .neq("status", "closed")
+      .order("created_at", { ascending: true });
+
+    if (error || !data || data.length === 0) {
+      select.innerHTML = `<option value="">No open complaints</option>`;
+      return;
+    }
+
+    openComplaints = data;
+
+    const params = new URLSearchParams(window.location.search);
+    const preselectId = params.get("id");
+
+    select.innerHTML = data.map((c) => `<option value="${c.id}">#${c.id} — ${c.title}</option>`).join("");
+
+    if (preselectId && data.some((c) => String(c.id) === preselectId)) {
+      select.value = preselectId;
+    }
+
+    renderPreview(data.find((c) => String(c.id) === select.value));
+  }
+
+  document.getElementById("complaintSelect").addEventListener("change", (e) => {
+    renderPreview(openComplaints.find((c) => String(c.id) === e.target.value));
+  });
+
+  document.getElementById("closeForm").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const msg = document.getElementById("msg");
+    const select = document.getElementById("complaintSelect");
+    const id = select.value;
+
+    if (!id) {
+      msg.textContent = "No complaint selected.";
+      msg.className = "msg error";
+      return;
+    }
+
+    msg.textContent = "Uploading photo...";
+    msg.className = "msg";
+
+    const note = document.getElementById("note").value.trim();
+    const file = document.getElementById("proofPhoto").files[0];
+    const filePath = `${id}/${Date.now()}-${file.name}`;
+
+    const { error: uploadErr } = await sb.storage.from("resolution-photos").upload(filePath, file);
+    if (uploadErr) {
+      msg.textContent = uploadErr.message;
+      msg.className = "msg error";
+      return;
+    }
+
+    const { data: urlData } = sb.storage.from("resolution-photos").getPublicUrl(filePath);
+
+    const { error: updateErr } = await sb
+      .from("complaints")
+      .update({
+        status: "closed",
+        resolution_note: note,
+        resolution_photo_url: urlData.publicUrl,
+        closed_by: currentUser.id,
+        closed_at: new Date().toISOString(),
+      })
+      .eq("id", id);
+
+    if (updateErr) {
+      msg.textContent = updateErr.message;
+      msg.className = "msg error";
+      return;
+    }
+
+    msg.textContent = "";
+    showToast(`Complaint #${id} closed — it now appears in the public bulletin.`, "success");
+    document.getElementById("closeForm").reset();
+    loadOpenComplaints();
+  });
+
+  (async () => {
+    currentUser = await requireRole("authority");
+    if (!currentUser) return;
+    await initNav();
+    loadOpenComplaints();
+  })();
+</script>
+</body>
+</html>

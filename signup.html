@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Create an account — CivicFix</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Newsreader:wght@500;600&family=IBM+Plex+Sans:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<header class="masthead">
+  <div class="masthead-top">
+    <a href="index.html" class="wordmark">Civic<span>Fix</span></a>
+  </div>
+  <nav class="tabs">
+    <a href="index.html">Login</a>
+  </nav>
+</header>
+
+<main>
+  <h1>Create a citizen account</h1>
+  <p>Authority accounts are created directly in Supabase and can't be self-registered here.</p>
+
+  <div class="form-card">
+    <form id="signupForm">
+      <label for="fullName">Full name</label>
+      <input type="text" id="fullName" required>
+
+      <label for="email">Email</label>
+      <input type="email" id="email" required>
+
+      <label for="password">Password</label>
+      <div class="password-field">
+        <input type="password" id="password" minlength="6" required>
+        <button type="button" id="togglePassword">👁</button>
+      </div>
+
+
+      <button type="submit">Create account</button>
+      <p class="msg" id="msg"></p>
+    </form>
+    <p style="margin-top: 18px; font-size: 0.88rem;">
+      Already have an account? <a href="index.html">Log in</a>.
+    </p>
+  </div>
+</main>
+
+<footer>CivicFix — Smart India Hackathon 2026</footer>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<script src="js/config.js"></script>
+<script src="js/supabaseClient.js"></script>
+<script>
+  document.getElementById("signupForm").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const msg = document.getElementById("msg");
+    msg.textContent = "";
+    msg.className = "msg";
+
+    const fullName = document.getElementById("fullName").value.trim();
+    const email = document.getElementById("email").value.trim();
+    const password = document.getElementById("password").value;
+
+    console.log("EMAIL:", JSON.stringify(email));
+    console.log("PASSWORD LENGTH:", password.length);
+
+    const { data, error } = await sb.auth.signUp({ email, password });
+
+    if (error) {
+      msg.textContent = error.message;
+      msg.className = "msg error";
+      return;
+    }
+
+    const { error: profErr } = await sb.from("profiles").insert({
+      id: data.user.id,
+      full_name: fullName,
+      role: "citizen",
+    });
+
+    if (profErr) {
+      msg.textContent = profErr.message;
+      msg.className = "msg error";
+      return;
+    }
+
+    msg.textContent = "Account created. Check your email to confirm, then log in.";
+    msg.className = "msg ok";
+    document.getElementById("signupForm").reset();
+  });
+
+  document.getElementById("togglePassword").addEventListener("click", () => {
+  const password = document.getElementById("password");
+
+  if (password.type === "password") {
+      password.type = "text";
+    } else {
+      password.type = "password";
+    }
+  });
+
+</script>
+</body>
+</html>
